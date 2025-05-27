@@ -34,11 +34,3 @@ if st.button("가사 생성하기"):
         st.write("\n**후렴:**")
         st.write(random.choice(chorus))
 
----
-
-### 실행 방법
-1. 파일을 예: `ai_lyric_generator.py`로 저장
-2. 터미널에서 실행:
-   ```bash
-   streamlit run ai_lyric_generator.py
-
