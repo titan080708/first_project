@@ -1,91 +1,54 @@
-# full_rpg_game.py
+# card_battle_game.py
 
 import streamlit as st
 import random
 
 # 초기화
-if "player_hp" not in st.session_state:
-    st.session_state.player_hp = 100
-    st.session_state.monster_hp = 100
-    st.session_state.inventory = ["🧪포션", "🧪포션"]
-    st.session_state.log = []
-    st.session_state.monster = random.choice(["고블린", "슬라임", "드래곤"])
-    st.session_state.monster_emoji = {"고블린": "👺", "슬라임": "🟢", "드래곤": "🐉"}[st.session_state.monster]
-    st.session_state.music_played = False
+if "deck" not in st.session_state:
+    st.session_state.deck = list(range(1, 14)) * 4  # 52장의 카드 (1~13)
+    random.shuffle(st.session_state.deck)
+    st.session_state.score = {"플레이어": 0, "컴퓨터": 0, "무승부": 0}
+    st.session_state.last_draw = []
 
-def render_health_bar(hp, max_hp=100):
-    bar_length = 20
-    filled = int(hp / max_hp * bar_length)
-    return "❤️" * filled + "⬜" * (bar_length - filled)
+st.title("🃏 카드 대결 게임")
 
-# 배경 음악
-if not st.session_state.music_played:
-    st.audio("https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3", autoplay=True)
-    st.session_state.music_played = True
+# 카드 뽑기
+if st.button("카드 뽑기"):
+    if len(st.session_state.deck) >= 2:
+        player_card = st.session_state.deck.pop()
+        computer_card = st.session_state.deck.pop()
+        st.session_state.last_draw = [player_card, computer_card]
 
-st.title("🎮 미니 도트 RPG: 숲속의 전투")
-
-# 상태 표시
-st.subheader("🧙‍♂️ 플레이어")
-st.text(render_health_bar(st.session_state.player_hp))
-st.text(f"HP: {st.session_state.player_hp} / 100")
-st.write("🎒 인벤토리:", " | ".join(st.session_state.inventory) if st.session_state.inventory else "없음")
-
-st.subheader(f"{st.session_state.monster_emoji} {st.session_state.monster}")
-st.text(render_health_bar(st.session_state.monster_hp))
-st.text(f"HP: {st.session_state.monster_hp} / 100")
-
-# 행동
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    if st.button("⚔️ 기본 공격"):
-        dmg = random.randint(10, 20)
-        st.session_state.monster_hp = max(0, st.session_state.monster_hp - dmg)
-        st.session_state.log.append(f"플레이어가 {st.session_state.monster}에게 {dmg} 데미지를 입혔다!")
-
-with col2:
-    if st.button("🔥 스킬 사용"):
-        dmg = random.randint(20, 35)
-        st.session_state.monster_hp = max(0, st.session_state.monster_hp - dmg)
-        recoil = random.randint(5, 10)
-        st.session_state.player_hp = max(0, st.session_state.player_hp - recoil)
-        st.session_state.log.append(f"강력한 스킬! {st.session_state.monster}에게 {dmg} 데미지. 반동으로 {recoil} 피해!")
-
-with col3:
-    if st.button("🧪 아이템 사용"):
-        if "🧪포션" in st.session_state.inventory:
-            heal = random.randint(20, 30)
-            st.session_state.player_hp = min(100, st.session_state.player_hp + heal)
-            st.session_state.inventory.remove("🧪포션")
-            st.session_state.log.append(f"포션을 사용해 {heal} 회복했다!")
+        if player_card > computer_card:
+            st.session_state.score["플레이어"] += 1
+            result = "😊 당신이 이겼어요!"
+        elif player_card < computer_card:
+            st.session_state.score["컴퓨터"] += 1
+            result = "😢 컴퓨터가 이겼어요."
         else:
-            st.warning("포션이 없습니다!")
+            st.session_state.score["무승부"] += 1
+            result = "😐 무승부입니다."
+        st.success(result)
+    else:
+        st.warning("덱에 카드가 부족합니다. 아래 버튼으로 리셋하세요.")
 
-# 몬스터 반격
-if st.session_state.monster_hp > 0 and st.session_state.player_hp > 0:
-    monster_attack = random.randint(10, 25)
-    st.session_state.player_hp = max(0, st.session_state.player_hp - monster_attack)
-    st.session_state.log.append(f"{st.session_state.monster}의 공격! {monster_attack} 피해를 입었다!")
+# 마지막 뽑은 카드 표시
+if st.session_state.last_draw:
+    st.subheader("🆚 이번 라운드")
+    st.write(f"**플레이어:** {st.session_state.last_draw[0]}   |   **컴퓨터:** {st.session_state.last_draw[1]}")
 
-# 로그 출력
-st.subheader("📜 전투 로그")
-for entry in reversed(st.session_state.log[-5:]):
-    st.write(entry)
+# 점수 표시
+st.subheader("📊 현재 점수")
+st.write(st.session_state.score)
 
-# 게임 종료 처리
-if st.session_state.player_hp <= 0:
-    st.error("💀 당신은 쓰러졌습니다... 게임 오버!")
-    if st.button("🔁 다시 시작"):
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
+# 남은 카드 수
+st.caption(f"남은 카드 수: {len(st.session_state.deck)}")
 
-elif st.session_state.monster_hp <= 0:
-    st.success(f"🎉 {st.session_state.monster}를 물리쳤습니다! 전리품을 얻었습니다!")
-    st.session_state.inventory.append("🧪포션")
-    if st.button("🧟‍♂️ 다음 몬스터 등장"):
-        st.session_state.monster = random.choice(["고블린", "슬라임", "드래곤"])
-        st.session_state.monster_emoji = {"고블린": "👺", "슬라임": "🟢", "드래곤": "🐉"}[st.session_state.monster]
-        st.session_state.monster_hp = 100
-        st.session_state.log.append(f"새로운 몬스터 {st.session_state.monster}가 나타났다!")
+# 리셋
+if st.button("🔁 게임 초기화"):
+    st.session_state.deck = list(range(1, 14)) * 4
+    random.shuffle(st.session_state.deck)
+    st.session_state.score = {"플레이어": 0, "컴퓨터": 0, "무승부": 0}
+    st.session_state.last_draw = []
+
 
