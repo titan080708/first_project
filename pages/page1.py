@@ -99,10 +99,7 @@ emoji_map = {0: "⬜", 1: "⬛", 2: "🧍", 3: "🚪", 4: "😈"}
 maze_display = "\n".join("".join(emoji_map[cell] for cell in row) for row in maze)
 st.markdown(f"```\n{maze_display}\n```")
 
-# 다시 시작
-if st.button("🔄 게임 다시 시작"):
-    st.session_state.initialized = False
-    st.experimental_rerun()
+
 
 
 
