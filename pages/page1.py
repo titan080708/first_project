@@ -3,85 +3,118 @@ import numpy as np
 import time
 import random
 
-# 초기 설정
-st.set_page_config(page_title="미로 게임", layout="centered")
-st.title("🎯 미로 게임: 적이 등장!")
+st.set_page_config(page_title="커스터마이징 미로 게임", layout="centered")
+st.title("🛠️ 커스터마이징 미로 게임")
 
-difficulty = st.sidebar.selectbox("난이도 선택", ["쉬움", "보통", "어려움"])
-maze_sizes = {"쉬움": 5, "보통": 7, "어려움": 9}
+# 맵 크기 선택
+size = st.sidebar.slider("맵 크기", 5, 15, 7)
 
-def generate_maze(size):
-    maze = np.ones((size, size), dtype=int)
-    maze[1:-1, 1:-1] = 0
-    maze[1, 1] = 2  # 플레이어
-    maze[-2, -2] = 3  # 출구
-    maze[1, size - 2] = 4  # 적
+# 초기 맵 생성 (모두 길(0))
+def init_maze(size):
+    maze = np.zeros((size, size), dtype=int)
+    maze[0, :] = 1
+    maze[-1, :] = 1
+    maze[:, 0] = 1
+    maze[:, -1] = 1
+    maze[1, 1] = 2  # 플레이어 시작 위치
+    maze[-2, -2] = 3  # 출구 위치
     return maze
 
-# 초기화
-if "initialized" not in st.session_state or st.session_state.difficulty != difficulty:
-    st.session_state.difficulty = difficulty
-    st.session_state.maze = generate_maze(maze_sizes[difficulty])
+if "maze" not in st.session_state or st.session_state.maze.shape[0] != size:
+    st.session_state.maze = init_maze(size)
     st.session_state.start_time = time.time()
     st.session_state.game_over = False
     st.session_state.last_key = ""
-    st.session_state.initialized = True
+    st.session_state.enemies = []
 
 maze = st.session_state.maze
 
-# 위치 찾기
+# 커스터마이징 - 벽을 토글하는 함수
+def toggle_cell(x, y):
+    if maze[x, y] == 1:
+        maze[x, y] = 0
+    elif maze[x, y] == 0:
+        maze[x, y] = 1
+
+# 맵 편집 UI
+st.write("▶ 벽을 클릭해 토글하세요 (벽=⬛, 길=⬜). 플레이어(🧍)와 출구(🚪)는 고정입니다.")
+cols = st.columns(size)
+for i in range(size):
+    row_cols = st.columns(size)
+    for j in range(size):
+        cell = maze[i, j]
+        label = "⬛" if cell == 1 else "⬜"
+        if cell == 2:
+            label = "🧍"
+        elif cell == 3:
+            label = "🚪"
+        elif cell == 4:
+            label = "👾"
+        if row_cols[j].button(label, key=f"{i}_{j}"):
+            # 플레이어, 출구, 적 위치는 편집 불가
+            if cell in [2, 3, 4]:
+                continue
+            toggle_cell(i, j)
+
+# 적 위치 초기화 (최대 3명)
+if "enemies" not in st.session_state or not st.session_state.enemies:
+    enemies = []
+    while len(enemies) < min(3, (size*size)//10):
+        ex, ey = random.randint(1, size-2), random.randint(1, size-2)
+        if maze[ex, ey] == 0 and (ex, ey) != (1,1) and (ex, ey) != (size-2, size-2):
+            enemies.append([ex, ey])
+            maze[ex, ey] = 4
+    st.session_state.enemies = enemies
+
+enemies = st.session_state.enemies
+
+# 플레이어 위치 찾기
 player_pos = np.argwhere(maze == 2)[0]
-enemy_pos = np.argwhere(maze == 4)[0]
 
-# 타이머
-elapsed = int(time.time() - st.session_state.start_time)
-st.sidebar.write(f"⏱️ 경과 시간: {elapsed}초")
+# 적 움직임 (랜덤으로 상하좌우 한 칸 이동)
+def move_enemies():
+    new_positions = []
+    for ex, ey in enemies:
+        maze[ex, ey] = 0
+        moves = [(1,0),(-1,0),(0,1),(0,-1),(0,0)]  # 제자리 포함
+        random.shuffle(moves)
+        for dx, dy in moves:
+            nx, ny = ex+dx, ey+dy
+            if 0 <= nx < size and 0 <= ny < size:
+                if maze[nx, ny] in [0]:
+                    ex, ey = nx, ny
+                    break
+        new_positions.append([ex, ey])
+    for ex, ey in new_positions:
+        maze[ex, ey] = 4
+    st.session_state.enemies = new_positions
 
-def move_entity(pos, dx, dy, target_val):
-    x, y = pos
-    new_x, new_y = x + dx, y + dy
-    if 0 <= new_x < maze.shape[0] and 0 <= new_y < maze.shape[1]:
-        if maze[new_x, new_y] in [0, 3]:
-            maze[x, y] = 0
-            maze[new_x, new_y] = target_val
-            return np.array([new_x, new_y])
-    return pos
-
-def move_enemy():
-    directions = [(-1,0), (1,0), (0,-1), (0,1)]
-    random.shuffle(directions)
-    for dx, dy in directions:
-        new_pos = move_entity(enemy_pos, dx, dy, 4)
-        if not np.array_equal(new_pos, enemy_pos):
-            return new_pos
-    return enemy_pos
-
+# 플레이어 이동 함수
 def move_player(dx, dy):
     if st.session_state.game_over:
         return
-    global player_pos, enemy_pos
     x, y = player_pos
-    new_x, new_y = x + dx, y + dy
-    if 0 <= new_x < maze.shape[0] and 0 <= new_y < maze.shape[1]:
-        target = maze[new_x, new_y]
-        if target in [0, 3, 4]:
-            if target == 3:
-                st.success(f"🎉 출구 도착! 경과 시간: {int(time.time() - st.session_state.start_time)}초")
-                st.session_state.game_over = True
-            elif target == 4:
-                st.error("💀 적에게 잡혔습니다! 게임 오버!")
-                st.session_state.game_over = True
+    nx, ny = x+dx, y+dy
+    if 0 <= nx < size and 0 <= ny < size:
+        # 벽이 아니고 적이 아니면 이동 가능
+        if maze[nx, ny] in [0, 3]:
             maze[x, y] = 0
-            maze[new_x, new_y] = 2
-            player_pos = np.array([new_x, new_y])
-            # 적 이동
-            enemy_pos = move_enemy()
-            # 적과 겹침 체크
-            if np.array_equal(player_pos, enemy_pos):
-                st.error("💀 적에게 잡혔습니다! 게임 오버!")
+            maze[nx, ny] = 2
+            # 적도 움직임
+            move_enemies()
+            # 적과 충돌 체크
+            for ex, ey in st.session_state.enemies:
+                if ex == nx and ey == ny:
+                    st.session_state.game_over = True
+                    st.error("💀 적에게 잡혔습니다! 게임 오버!")
+                    return
+            # 출구 도착 체크
+            if maze[nx, ny] == 3:
                 st.session_state.game_over = True
+                elapsed = int(time.time() - st.session_state.start_time)
+                st.success(f"🎉 출구 도착! 소요 시간: {elapsed}초")
 
-# 키 입력
+# 방향키 입력
 key = st.text_input("방향키 입력 (w/a/s/d):", value=st.session_state.last_key)
 if key:
     st.session_state.last_key = key
@@ -95,9 +128,23 @@ if key:
         move_player(0, 1)
 
 # 미로 표시
-emoji_map = {0: "⬜", 1: "⬛", 2: "🧍", 3: "🚪", 4: "😈"}
+emoji_map = {0:"⬜", 1:"⬛", 2:"🧍", 3:"🚪", 4:"👾"}
 maze_display = "\n".join("".join(emoji_map[cell] for cell in row) for row in maze)
 st.markdown(f"```\n{maze_display}\n```")
+
+# 타이머 표시
+elapsed = int(time.time() - st.session_state.start_time)
+st.sidebar.write(f"⏱️ 경과 시간: {elapsed}초")
+
+# 게임 재시작 버튼
+if st.button("🔄 게임 다시 시작"):
+    st.session_state.maze = init_maze(size)
+    st.session_state.start_time = time.time()
+    st.session_state.game_over = False
+    st.session_state.last_key = ""
+    st.session_state.enemies = []
+    st.experimental_rerun()
+
 
 
 
