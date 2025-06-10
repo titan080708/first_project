@@ -136,14 +136,6 @@ st.markdown(f"```\n{maze_display}\n```")
 elapsed = int(time.time() - st.session_state.start_time)
 st.sidebar.write(f"⏱️ 경과 시간: {elapsed}초")
 
-# 게임 재시작 버튼
-if st.button("🔄 게임 다시 시작"):
-    st.session_state.maze = init_maze(size)
-    st.session_state.start_time = time.time()
-    st.session_state.game_over = False
-    st.session_state.last_key = ""
-    st.session_state.enemies = []
-    st.experimental_rerun()
 
 
 
