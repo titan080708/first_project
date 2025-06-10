@@ -1,336 +1,326 @@
-import pygame
-import sys
-import math
+import streamlit as st
+import streamlit.components.v1 as components
 
-# -----------------------------
-# 설정값
-# -----------------------------
-SCREEN_WIDTH, SCREEN_HEIGHT = 800, 600
-FPS = 60
+st.set_page_config(page_title="Isaac-like Game in Streamlit", layout="wide")
+st.title("Isaac-like Mini Game (Streamlit Embedding)")
+st.markdown(
+    """
+    **조작법**  
+    - **WASD**: 플레이어 이동  
+    - **방향키(↑↓←→)**: 발사  
+    - 적이 자동으로 화면 가장자리에서 스폰되어 플레이어를 추격합니다.  
+    - 플레이어 체력(HP)이 0이 되면 게임 오버가 표시됩니다.
+    """
+)
 
-UNIT_SIZE = 20
-UNIT_SPEED = 1.5
+# ───────────────────────────────────────────────────────────────────────
+# 아래 HTML/JS 코드는 Canvas 기반의 간단한 Isaac-like 게임을 구현합니다.
+# 플레이어, 벽, 탄환, 적 스폰 및 추격, 충돌 처리를 전부 JavaScript로 작성했습니다.
+# Streamlit에서는 이를 components.html을 통해 임베드해서 보여줍니다.
+# ───────────────────────────────────────────────────────────────────────
 
-ENEMY_SIZE = 20
-ENEMY_HP = 50
+html_code = """
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>Isaac-like Mini Game</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+    }
+    #gameCanvas {
+      background: #1e1e1e;
+      display: block;
+      margin: 0 auto;
+      border: 2px solid #444;
+    }
+    #hpDisplay {
+      position: absolute;
+      left: 20px;
+      top: 20px;
+      color: #fff;
+      font-family: Arial, sans-serif;
+      font-size: 20px;
+    }
+    #gameOver {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: #ff4444;
+      font-family: Arial, sans-serif;
+      font-size: 48px;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="hpDisplay">HP: 5</div>
+  <div id="gameOver">Game Over</div>
+  <canvas id="gameCanvas" width="800" height="600"></canvas>
+  <script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+    const hpDisplay = document.getElementById("hpDisplay");
+    const gameOverDiv = document.getElementById("gameOver");
 
-RESOURCE_NODE_SIZE = 15
-RESOURCE_NODE_AMOUNT = 50
+    const SCREEN_WIDTH = 800;
+    const SCREEN_HEIGHT = 600;
+    const FPS = 60;
 
-BUILDING_SIZE = 30
-BUILD_COST = 10
+    // 플레이어 정보
+    const PLAYER_SIZE = 20;
+    const PLAYER_SPEED = 3;
+    let player = {
+      x: SCREEN_WIDTH / 2,
+      y: SCREEN_HEIGHT / 2,
+      size: PLAYER_SIZE,
+      speed: PLAYER_SPEED,
+      hp: 5
+    };
 
-FONT_SIZE = 24
+    // 벽(사각형) 배열
+    const walls = [
+      // 화면 테두리
+      { x: 0, y: 0, w: SCREEN_WIDTH, h: 20 },             // 상단
+      { x: 0, y: SCREEN_HEIGHT - 20, w: SCREEN_WIDTH, h: 20 }, // 하단
+      { x: 0, y: 0, w: 20, h: SCREEN_HEIGHT },             // 좌측
+      { x: SCREEN_WIDTH - 20, y: 0, w: 20, h: SCREEN_HEIGHT }, // 우측
+      // 방 가운데 가로 벽 두 개 (예시)
+      { x: 200, y: 150, w: 400, h: 20 },
+      { x: 200, y: 430, w: 400, h: 20 }
+    ];
 
-# -----------------------------
-# 유틸 함수
-# -----------------------------
-def distance(a, b):
-    return math.hypot(a[0] - b[0], a[1] - b[1])
+    // 탄환, 적 리스트
+    let bullets = [];
+    let enemies = [];
 
-# -----------------------------
-# 클래스 정의
-# -----------------------------
-class Unit:
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
-        self.size = UNIT_SIZE
-        self.speed = UNIT_SPEED
+    // 적 스폰 간격 (ms)
+    const ENEMY_SPAWN_INTERVAL = 2000;
 
-        # 상태 관리: 'idle', 'move', 'gather', 'attack'
-        self.state = 'idle'
-        self.target_pos = None        # {'x':…, 'y':…}
-        self.gather_target = None     # ResourceNode 인스턴스
-        self.attack_target = None     # EnemyUnit 인스턴스
-        self.gather_cooldown = 0
+    // 키 입력 상태 추적
+    let keys = {};
+    window.addEventListener("keydown", (e) => {
+      keys[e.code] = true;
+    });
+    window.addEventListener("keyup", (e) => {
+      keys[e.code] = false;
+    });
 
-    def update(self, dt, resources, resource_nodes, enemy_units):
-        # --- 이동 상태 ---
-        if self.state == 'move' and self.target_pos:
-            tx, ty = self.target_pos
-            dx, dy = tx - self.x, ty - self.y
-            dist = math.hypot(dx, dy)
-            if dist > self.speed:
-                self.x += dx / dist * self.speed
-                self.y += dy / dist * self.speed
-            else:
-                # 목표 위치 도착
-                self.x = tx
-                self.y = ty
-                self.target_pos = None
-                self.state = 'idle'
+    // 거리 계산
+    function getDistance(ax, ay, bx, by) {
+      return Math.hypot(bx - ax, by - ay);
+    }
 
-        # --- 자원 채집 상태 ---
-        elif self.state == 'gather' and self.gather_target:
-            node = self.gather_target
-            dx, dy = node.x - self.x, node.y - self.y
-            dist = math.hypot(dx, dy)
-            if dist > self.speed:
-                # 자원 노드로 이동
-                self.x += dx / dist * self.speed
-                self.y += dy / dist * self.speed
-            else:
-                # 노드에 도착 → 채집 쿨다운
-                self.gather_cooldown += 1
-                if self.gather_cooldown >= FPS:   # 약 1초마다 채집
-                    if node.amount > 0:
-                        node.amount -= 5
-                        resources[0] += 5
-                    self.gather_cooldown = 0
-                # 만약 자원이 바닥나면 idle
-                if node.amount <= 0:
-                    if node in resource_nodes:
-                        resource_nodes.remove(node)
-                    self.state = 'idle'
-                    self.gather_target = None
+    // 벽과 충돌 감지를 위해 사각형 충돌 검사
+    function rectsOverlap(r1, r2) {
+      return !(
+        r1.x + r1.w < r2.x ||
+        r2.x + r2.w < r1.x ||
+        r1.y + r1.h < r2.y ||
+        r2.y + r2.h < r1.y
+      );
+    }
 
-        # --- 공격 상태 ---
-        elif self.state == 'attack' and self.attack_target:
-            enemy = self.attack_target
-            dx, dy = enemy.x - self.x, enemy.y - self.y
-            dist = math.hypot(dx, dy)
-            if dist > self.speed + enemy.size:
-                # 적에게 다가가기
-                self.x += dx / dist * self.speed
-                self.y += dy / dist * self.speed
-            else:
-                # 공격해서 HP 감소
-                enemy.hp -= 0.5
-                if enemy.hp <= 0:
-                    if enemy in enemy_units:
-                        enemy_units.remove(enemy)
-                    self.state = 'idle'
-                    self.attack_target = None
+    // 플레이어 이동 처리
+    function movePlayer() {
+      let dx = 0,
+        dy = 0;
+      if (keys["KeyW"]) dy -= player.speed;
+      if (keys["KeyS"]) dy += player.speed;
+      if (keys["KeyA"]) dx -= player.speed;
+      if (keys["KeyD"]) dx += player.speed;
 
-    def draw(self, surface, is_selected):
-        color = (0, 255, 0) if is_selected else (0, 200, 255)
-        rect = pygame.Rect(self.x - self.size/2, self.y - self.size/2, self.size, self.size)
-        pygame.draw.rect(surface, color, rect)
+      // X축 가상의 충돌 검사
+      let nextX = player.x + dx;
+      let playerRectX = { x: nextX - player.size / 2, y: player.y - player.size / 2, w: player.size, h: player.size };
+      let collideX = walls.some((w) => rectsOverlap(playerRectX, w));
+      if (!collideX) player.x = nextX;
 
-class EnemyUnit:
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
-        self.size = ENEMY_SIZE
-        self.hp = ENEMY_HP
+      // Y축 가상의 충돌 검사
+      let nextY = player.y + dy;
+      let playerRectY = { x: player.x - player.size / 2, y: nextY - player.size / 2, w: player.size, h: player.size };
+      let collideY = walls.some((w) => rectsOverlap(playerRectY, w));
+      if (!collideY) player.y = nextY;
+    }
 
-    def draw(self, surface):
-        rect = pygame.Rect(self.x - self.size/2, self.y - self.size/2, self.size, self.size)
-        pygame.draw.rect(surface, (255, 50, 50), rect)
+    // 탄환 객체 생성 함수
+    function shootBullet(dirX, dirY) {
+      // 방향 벡터 정규화
+      let mag = Math.hypot(dirX, dirY);
+      if (mag === 0) {
+        dirX = 0; dirY = -1;
+      } else {
+        dirX /= mag; dirY /= mag;
+      }
+      bullets.push({
+        x: player.x,
+        y: player.y,
+        dx: dirX * 7,
+        dy: dirY * 7,
+        size: 6
+      });
+    }
 
-class ResourceNode:
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
-        self.size = RESOURCE_NODE_SIZE
-        self.amount = RESOURCE_NODE_AMOUNT
+    // 적 생성 함수 (화면 가장자리 랜덤 위치)
+    function spawnEnemy() {
+      let side = ["top", "bottom", "left", "right"][Math.floor(Math.random() * 4)];
+      let ex, ey;
+      if (side === "top") {
+        ex = Math.random() * (SCREEN_WIDTH - 100) + 50;
+        ey = 30;
+      } else if (side === "bottom") {
+        ex = Math.random() * (SCREEN_WIDTH - 100) + 50;
+        ey = SCREEN_HEIGHT - 30;
+      } else if (side === "left") {
+        ex = 30;
+        ey = Math.random() * (SCREEN_HEIGHT - 100) + 50;
+      } else {
+        ex = SCREEN_WIDTH - 30;
+        ey = Math.random() * (SCREEN_HEIGHT - 100) + 50;
+      }
+      enemies.push({
+        x: ex,
+        y: ey,
+        size: 18,
+        speed: 1.5,
+        hp: 3
+      });
+    }
 
-    def draw(self, surface):
-        pygame.draw.circle(surface, (212, 175, 55), (int(self.x), int(self.y)), self.size)
+    // 게임 오버 처리
+    function gameOver() {
+      gameOverDiv.style.display = "block";
+    }
 
-class Building:
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
-        self.size = BUILDING_SIZE
+    // 주요 업데이트 함수
+    let lastSpawn = Date.now();
+    function update() {
+      if (player.hp <= 0) return;
 
-    def draw(self, surface):
-        rect = pygame.Rect(self.x - self.size/2, self.y - self.size/2, self.size, self.size)
-        pygame.draw.rect(surface, (100, 100, 100), rect)
+      // 플레이어 이동
+      movePlayer();
 
-# -----------------------------
-# 초기화
-# -----------------------------
-pygame.init()
-screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-pygame.display.set_caption("Mini RTS (Python/Pygame)")
-clock = pygame.time.Clock()
-font = pygame.font.SysFont(None, FONT_SIZE)
+      // 탄환 발사 (새 프레임마다 화살표 키가 눌린 경우)
+      if (keys["ArrowUp"])    shootBullet(0, -1);
+      if (keys["ArrowDown"])  shootBullet(0, 1);
+      if (keys["ArrowLeft"])  shootBullet(-1, 0);
+      if (keys["ArrowRight"]) shootBullet(1, 0);
 
-# 게임 객체들 생성
-friendly_units = []
-enemy_units = []
-resource_nodes = []
-buildings = []
-selected_units = []
+      // 탄환 업데이트
+      bullets = bullets.filter(b => {
+        b.x += b.dx;
+        b.y += b.dy;
+        // 화면 밖으로 나가면 제거
+        return !(b.x < -b.size || b.x > SCREEN_WIDTH + b.size || b.y < -b.size || b.y > SCREEN_HEIGHT + b.size);
+      });
 
-# 자원 카운트 (mutable int 형태로 리스트에 담아서 참조)
-resources = [0]
+      // 적 스폰 간격 체크
+      if (Date.now() - lastSpawn > ENEMY_SPAWN_INTERVAL) {
+        spawnEnemy();
+        lastSpawn = Date.now();
+      }
 
-# 친선 유닛 5개 생성
-for i in range(5):
-    u = Unit(100 + i * 40, 500)
-    friendly_units.append(u)
+      // 적 업데이트 (플레이어 추격 및 충돌 검사)
+      enemies = enemies.filter(e => {
+        // 플레이어 방향으로 이동
+        let dx = player.x - e.x;
+        let dy = player.y - e.y;
+        let dist = Math.hypot(dx, dy);
+        if (dist !== 0) {
+          dx /= dist; dy /= dist;
+        }
+        // X축 충돌 체크
+        let nextX = e.x + dx * e.speed;
+        let eRectX = { x: nextX - e.size / 2, y: e.y - e.size / 2, w: e.size, h: e.size };
+        if (!walls.some(w => rectsOverlap(eRectX, w))) {
+          e.x = nextX;
+        }
+        // Y축 충돌 체크
+        let nextY = e.y + dy * e.speed;
+        let eRectY = { x: e.x - e.size / 2, y: nextY - e.size / 2, w: e.size, h: e.size };
+        if (!walls.some(w => rectsOverlap(eRectY, w))) {
+          e.y = nextY;
+        }
 
-# 적 유닛 3개 생성
-for i in range(3):
-    eu = EnemyUnit(600 + i * 50, 100 + i * 50)
-    enemy_units.append(eu)
+        // 플레이어와 충돌 검사
+        let playerRect = { x: player.x - player.size / 2, y: player.y - player.size / 2, w: player.size, h: player.size };
+        let enemyRect  = { x: e.x - e.size / 2,  y: e.y - e.size / 2,   w: e.size,   h: e.size };
+        if (rectsOverlap(playerRect, enemyRect)) {
+          player.hp -= 1;
+          hpDisplay.innerText = "HP: " + player.hp;
+          return false; // 충돌 즉시 적 파괴
+        }
+        return true;
+      });
 
-# 자원 노드 4개 생성
-for i in range(4):
-    rn = ResourceNode(200 + i * 100, 200)
-    resource_nodes.append(rn)
+      // 탄환 ↔ 적 충돌 검사
+      bullets.forEach((b, bi) => {
+        enemies.forEach((e, ei) => {
+          let bRect = { x: b.x - b.size / 2, y: b.y - b.size / 2, w: b.size, h: b.size };
+          let eRect = { x: e.x - e.size / 2, y: e.y - e.size / 2, w: e.size, h: e.size };
+          if (rectsOverlap(bRect, eRect)) {
+            e.hp -= 1;
+            if (e.hp <= 0) {
+              enemies.splice(ei, 1);
+            }
+            bullets.splice(bi, 1);
+          }
+        });
+      });
 
-# 드래그 선택용 변수
-is_dragging = False
-drag_start = (0, 0)
-drag_end = (0, 0)
+      if (player.hp <= 0) {
+        gameOver();
+      }
+    }
 
-# 건설 모드 플래그
-is_build_mode = False
+    // 그리기 함수
+    function draw() {
+      // 배경
+      ctx.fillStyle = "#1e1e1e";
+      ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
 
-# -----------------------------
-# 메인 루프
-# -----------------------------
-running = True
-while running:
-    dt = clock.tick(FPS) / 1000.0  # 초 단위 델타타임
+      // 벽 그리기
+      ctx.fillStyle = "#555";
+      walls.forEach(w => {
+        ctx.fillRect(w.x, w.y, w.w, w.h);
+      });
 
-    # -----------------------------
-    # 이벤트 처리
-    # -----------------------------
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            running = False
+      // 탄환 그리기
+      ctx.fillStyle = "#f0f000";
+      bullets.forEach(b => {
+        ctx.fillRect(b.x - b.size / 2, b.y - b.size / 2, b.size, b.size);
+      });
 
-        # 마우스 왼쪽 버튼 눌렀을 때
-        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            mx, my = pygame.mouse.get_pos()
+      // 적 그리기
+      ctx.fillStyle = "#e03030";
+      enemies.forEach(e => {
+        ctx.fillRect(e.x - e.size / 2, e.y - e.size / 2, e.size, e.size);
+      });
 
-            # 건설 모드일 때
-            if is_build_mode:
-                if resources[0] >= BUILD_COST:
-                    # 건물 배치
-                    buildings.append(Building(mx, my))
-                    resources[0] -= BUILD_COST
-                is_build_mode = False
-            else:
-                # 드래그 시작
-                is_dragging = True
-                drag_start = (mx, my)
-                drag_end = (mx, my)
+      // 플레이어 그리기
+      ctx.fillStyle = "#32c8dc";
+      ctx.fillRect(player.x - player.size / 2, player.y - player.size / 2, player.size, player.size);
+    }
 
-        # 마우스 이동
-        elif event.type == pygame.MOUSEMOTION and is_dragging:
-            drag_end = pygame.mouse.get_pos()
+    // 게임 루프
+    function gameLoop() {
+      update();
+      draw();
+      requestAnimationFrame(gameLoop);
+    }
 
-        # 마우스 왼쪽 버튼 뗄 때
-        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1 and is_dragging:
-            is_dragging = False
-            x1, y1 = drag_start
-            x2, y2 = drag_end
-            left = min(x1, x2); right = max(x1, x2)
-            top = min(y1, y2); bottom = max(y1, y2)
+    // 시작
+    hpDisplay.innerText = "HP: " + player.hp;
+    gameLoop();
+  </script>
+</body>
+</html>
+"""
 
-            # 선택 초기화
-            selected_units.clear()
+# Streamlit 페이지에 HTML/JS 임베드
+components.html(html_code, width=820, height=640, scrolling=False)
+"""
 
-            # 드래그 범위가 작으면 “클릭”으로 간주하여
-            # 클릭 위치에 유닛이 있으면 단일 선택
-            if math.hypot(x2 - x1, y2 - y1) < 5:
-                clicked = False
-                for u in friendly_units:
-                    if left < u.x < right and top < u.y < bottom:
-                        selected_units = [u]
-                        clicked = True
-                        break
-                if not clicked:
-                    selected_units.clear()
-            else:
-                # 드래그 박스로 다중 선택
-                for u in friendly_units:
-                    if left < u.x < right and top < u.y < bottom:
-                        selected_units.append(u)
-
-        # 마우스 오른쪽 버튼 (명령)
-        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
-            mx, my = pygame.mouse.get_pos()
-
-            # 클릭한 지점에 자원 노드가 있는지 체크
-            clicked_node = None
-            for node in resource_nodes:
-                if distance((mx, my), (node.x, node.y)) < node.size:
-                    clicked_node = node
-                    break
-
-            # 클릭한 지점에 적이 있는지 체크
-            clicked_enemy = None
-            for eu in enemy_units:
-                if (eu.x - eu.size/2 < mx < eu.x + eu.size/2 and
-                    eu.y - eu.size/2 < my < eu.y + eu.size/2):
-                    clicked_enemy = eu
-                    break
-
-            # 선택된 유닛들에 상태 부여
-            for u in selected_units:
-                if clicked_node:
-                    u.state = 'gather'
-                    u.gather_target = clicked_node
-                    u.attack_target = None
-                    u.target_pos = None
-                elif clicked_enemy:
-                    u.state = 'attack'
-                    u.attack_target = clicked_enemy
-                    u.gather_target = None
-                    u.target_pos = None
-                else:
-                    u.state = 'move'
-                    u.target_pos = {'x': mx, 'y': my}
-                    u.gather_target = None
-                    u.attack_target = None
-
-        # 키보드 입력 (건설 모드 진입: B)
-        elif event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_b:
-                is_build_mode = True
-
-    # -----------------------------
-    # 게임 로직 업데이트
-    # -----------------------------
-    for u in friendly_units:
-        u.update(dt, resources, resource_nodes, enemy_units)
-
-    # -----------------------------
-    # 화면 그리기
-    # -----------------------------
-    screen.fill((30, 30, 30))
-
-    # 자원 노드 그리기
-    for node in resource_nodes:
-        node.draw(screen)
-
-    # 건물 그리기
-    for b in buildings:
-        b.draw(screen)
-
-    # 적 유닛 그리기
-    for eu in enemy_units:
-        eu.draw(screen)
-
-    # 유닛 그리기 (선택 여부에 따라 색상 다름)
-    for u in friendly_units:
-        u.draw(screen, u in selected_units)
-
-    # 드래그 박스 그리기
-    if is_dragging:
-        x1, y1 = drag_start
-        x2, y2 = drag_end
-        left = min(x1, x2); top = min(y1, y2)
-        width = abs(x2 - x1); height = abs(y2 - y1)
-        pygame.draw.rect(screen, (200, 200, 200), (left, top, width, height), 1)
-
-    # 자원 개수 텍스트 표시
-    text_surf = font.render(f"Resources: {resources[0]}", True, (255, 255, 255))
-    screen.blit(text_surf, (10, 10))
-
-    # 건설 모드 안내 텍스트
-    if is_build_mode:
-        info_surf = font.render("Building Mode: Left-Click to place (Cost: 10)", True, (255, 255, 0))
-        screen.blit(info_surf, (SCREEN_WIDTH//2 - info_surf.get_width()//2, 10))
-
-    pygame.display.flip()
-
-pygame.quit()
-sys.exit()
