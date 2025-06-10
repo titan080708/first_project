@@ -1,326 +1,258 @@
-import streamlit as st
-import streamlit.components.v1 as components
+import random
+import sys
 
-st.set_page_config(page_title="Isaac-like Game in Streamlit", layout="wide")
-st.title("Isaac-like Mini Game (Streamlit Embedding)")
-st.markdown(
-    """
-    **조작법**  
-    - **WASD**: 플레이어 이동  
-    - **방향키(↑↓←→)**: 발사  
-    - 적이 자동으로 화면 가장자리에서 스폰되어 플레이어를 추격합니다.  
-    - 플레이어 체력(HP)이 0이 되면 게임 오버가 표시됩니다.
-    """
-)
+# -----------------------------
+# 클래스 정의
+# -----------------------------
+class Player:
+    def __init__(self, name):
+        self.name = name
+        self.level = 1
+        self.exp = 0
+        self.next_level_exp = 100
+        self.max_hp = 100
+        self.hp = self.max_hp
+        self.attack = 10
+        self.defense = 5
+        self.gold = 50
+        self.inventory = {"Potion": 3}  # 시작 시 포션 3개 보유
 
-# ───────────────────────────────────────────────────────────────────────
-# 아래 HTML/JS 코드는 Canvas 기반의 간단한 Isaac-like 게임을 구현합니다.
-# 플레이어, 벽, 탄환, 적 스폰 및 추격, 충돌 처리를 전부 JavaScript로 작성했습니다.
-# Streamlit에서는 이를 components.html을 통해 임베드해서 보여줍니다.
-# ───────────────────────────────────────────────────────────────────────
+    def is_alive(self):
+        return self.hp > 0
 
-html_code = """
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-  <meta charset="UTF-8" />
-  <title>Isaac-like Mini Game</title>
-  <style>
-    body {
-      margin: 0;
-      overflow: hidden;
+    def gain_exp(self, amount):
+        self.exp += amount
+        print(f"\n▶ You gained {amount} EXP.")
+        while self.exp >= self.next_level_exp:
+            self.level_up()
+
+    def level_up(self):
+        self.exp -= self.next_level_exp
+        self.level += 1
+        # 다음 레벨업에 필요한 경험치 증가
+        self.next_level_exp = int(self.next_level_exp * 1.5)
+        # 능력치 상승
+        self.max_hp = int(self.max_hp * 1.2)
+        self.attack = int(self.attack * 1.2)
+        self.defense = int(self.defense * 1.1)
+        self.hp = self.max_hp
+        print(f"\n*** Congratulations! You reached level {self.level}! ***")
+        print(f"   ▶ New Stats → HP: {self.max_hp}, Attack: {self.attack}, Defense: {self.defense}\n")
+
+    def use_potion(self):
+        if self.inventory.get("Potion", 0) > 0:
+            self.inventory["Potion"] -= 1
+            heal_amount = int(self.max_hp * 0.3)
+            self.hp = min(self.max_hp, self.hp + heal_amount)
+            print(f"\n▶ You used a Potion and recovered {heal_amount} HP. (HP: {self.hp}/{self.max_hp})")
+        else:
+            print("\n▶ You have no Potions!")
+
+    def show_status(self):
+        print(f"\n-- {self.name}'s Status --")
+        print(f" Level: {self.level} | EXP: {self.exp}/{self.next_level_exp}")
+        print(f" HP: {self.hp}/{self.max_hp} | Attack: {self.attack} | Defense: {self.defense}")
+        print(f" Gold: {self.gold}")
+        print(f" Inventory: {self.inventory}")
+        print("--------------------------\n")
+
+
+class Enemy:
+    def __init__(self, name, level):
+        self.name = name
+        self.level = level
+        self.max_hp = level * 50
+        self.hp = self.max_hp
+        self.attack = level * 8
+        self.defense = level * 4
+        self.exp_drop = level * 50
+        self.gold_drop = level * 20
+
+    def is_alive(self):
+        return self.hp > 0
+
+    def show_stats(self):
+        print(f"\n-- {self.name} (Lv {self.level}) --")
+        print(f" HP: {self.hp}/{self.max_hp} | Attack: {self.attack} | Defense: {self.defense}")
+        print("--------------------------\n")
+
+
+# -----------------------------
+# 전투 함수
+# -----------------------------
+def battle(player, enemy):
+    print(f"\n▶ A wild {enemy.name} appeared!")
+    enemy.show_stats()
+
+    while player.is_alive() and enemy.is_alive():
+        print("Choose action: [1] Attack  [2] Use Potion  [3] Run")
+        choice = input("> ").strip()
+
+        if choice == "1":
+            # 플레이어 공격
+            damage = max(0, player.attack - enemy.defense + random.randint(-5, 5))
+            enemy.hp = max(0, enemy.hp - damage)
+            print(f"▶ You attack {enemy.name} for {damage} damage. (Enemy HP: {enemy.hp}/{enemy.max_hp})")
+
+            if not enemy.is_alive():
+                print(f"\n▶ You defeated {enemy.name}!")
+                player.gain_exp(enemy.exp_drop)
+                player.gold += enemy.gold_drop
+                print(f"▶ You found {enemy.gold_drop} gold. (Gold: {player.gold})\n")
+                return True
+
+        elif choice == "2":
+            player.use_potion()
+
+        elif choice == "3":
+            # 도망 성공 확률 50%
+            if random.random() < 0.5:
+                print("\n▶ You successfully ran away!")
+                return False
+            else:
+                print("\n▶ Failed to run away!")
+
+        else:
+            print("\n▶ Invalid choice. Try again.")
+
+        # 적 턴
+        if enemy.is_alive():
+            damage = max(0, enemy.attack - player.defense + random.randint(-5, 5))
+            player.hp = max(0, player.hp - damage)
+            print(f"▶ {enemy.name} attacks you for {damage} damage. (Your HP: {player.hp}/{player.max_hp})")
+            if not player.is_alive():
+                print("\n▶ You were defeated! Game Over.")
+                sys.exit()
+
+    return False
+
+
+# -----------------------------
+# 마을(Town) 및 숲(Forest) 로직
+# -----------------------------
+def visit_town(player, quest_status):
+    print("\n▶ You are in the Town.")
+    print("Options: [1] Talk to NPC  [2] Visit Shop  [3] Rest at Inn  [4] Go to Forest  [5] View Status")
+    choice = input("> ").strip()
+
+    if choice == "1":
+        # NPC 대화 및 퀘스트 진행
+        if not quest_status.get("started"):
+            print("\nNPC: 'Brave adventurer! Can you help us? A Goblin King is terrorizing the Forest.'")
+            print("NPC: 'Defeat the Goblin King and you shall be rewarded with 100 gold!'")
+            quest_status["started"] = True
+
+        elif quest_status.get("completed") and not quest_status.get("rewarded"):
+            print("\nNPC: 'Thank you for defeating the Goblin King! Here's your reward.'")
+            player.gold += 100
+            print(f"▶ You received 100 gold! (Gold: {player.gold})")
+            quest_status["rewarded"] = True
+
+        elif quest_status.get("rewarded"):
+            print("\nNPC: 'We are forever in your debt, hero!'")
+
+        else:
+            print("\nNPC: 'The Goblin King still awaits you in the Forest.'")
+
+    elif choice == "2":
+        visit_shop(player)
+
+    elif choice == "3":
+        # 여관 휴식: 골드 10 소모 → HP 전부 회복
+        cost = 10
+        print(f"\nInn: Resting costs {cost} gold. Confirm? [Y/N]")
+        confirm = input("> ").lower().strip()
+        if confirm == "y" and player.gold >= cost:
+            player.gold -= cost
+            player.hp = player.max_hp
+            print(f"▶ You rested at the inn. HP fully recovered. (Gold: {player.gold})")
+        else:
+            print("\n▶ You don't have enough gold or you canceled.")
+
+    elif choice == "4":
+        return "Forest", quest_status
+
+    elif choice == "5":
+        player.show_status()
+
+    else:
+        print("\n▶ Invalid choice.")
+
+    return "Town", quest_status
+
+
+def visit_shop(player):
+    print("\n▶ Welcome to the Shop!")
+    print("Items available: [1] Potion (20 gold)  [2] Return to Town")
+    choice = input("> ").strip()
+
+    if choice == "1":
+        if player.gold >= 20:
+            player.gold -= 20
+            player.inventory["Potion"] = player.inventory.get("Potion", 0) + 1
+            print(f"▶ Purchased a Potion. (Potions: {player.inventory['Potion']}, Gold: {player.gold})")
+        else:
+            print("\n▶ Not enough gold.")
+
+    elif choice == "2":
+        return
+
+    else:
+        print("\n▶ Invalid choice.")
+
+    visit_shop(player)
+
+
+def visit_forest(player, quest_status):
+    print("\n▶ You venture into the Forest.")
+
+    # 퀘스트가 시작되었고 완료되지 않았다면 보스(고블린 킹) 등장
+    if quest_status.get("started") and not quest_status.get("completed"):
+        enemy = Enemy("Goblin King", level=3)
+        defeated = battle(player, enemy)
+        if defeated:
+            quest_status["completed"] = True
+
+    else:
+        # 일반 몬스터 등장 확률 (약 70% 전투, 30% 평화 탐험)
+        if random.random() < 0.3:
+            print("▶ No enemies encountered. You explore peacefully.")
+        else:
+            # 퀘스트 시작 전: Goblin Lv1, 퀘스트 중: Goblin Lv2
+            goblin_level = 1 if not quest_status.get("started") else 2
+            enemy = Enemy("Goblin", level=goblin_level)
+            battle(player, enemy)
+
+    print("▶ Returning to Town...")
+    return "Town", quest_status
+
+
+# -----------------------------
+# 메인 게임 루프
+# -----------------------------
+def main():
+    print("=== Welcome to the Text RPG ===")
+    name = input("Enter your character's name: ").strip()
+    if not name:
+        name = "Hero"
+    player = Player(name)
+
+    # 퀘스트 상태 관리
+    quest_status = {
+        "started": False,
+        "completed": False,
+        "rewarded": False
     }
-    #gameCanvas {
-      background: #1e1e1e;
-      display: block;
-      margin: 0 auto;
-      border: 2px solid #444;
-    }
-    #hpDisplay {
-      position: absolute;
-      left: 20px;
-      top: 20px;
-      color: #fff;
-      font-family: Arial, sans-serif;
-      font-size: 20px;
-    }
-    #gameOver {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      color: #ff4444;
-      font-family: Arial, sans-serif;
-      font-size: 48px;
-      display: none;
-    }
-  </style>
-</head>
-<body>
-  <div id="hpDisplay">HP: 5</div>
-  <div id="gameOver">Game Over</div>
-  <canvas id="gameCanvas" width="800" height="600"></canvas>
-  <script>
-    const canvas = document.getElementById("gameCanvas");
-    const ctx = canvas.getContext("2d");
-    const hpDisplay = document.getElementById("hpDisplay");
-    const gameOverDiv = document.getElementById("gameOver");
+    location = "Town"
 
-    const SCREEN_WIDTH = 800;
-    const SCREEN_HEIGHT = 600;
-    const FPS = 60;
+    while True:
+        if location == "Town":
+            location, quest_status = visit_town(player, quest_status)
+        elif location == "Forest":
+            location, quest_status = visit_forest(player, quest_status)
+        else:
+            location = "Town"
 
-    // 플레이어 정보
-    const PLAYER_SIZE = 20;
-    const PLAYER_SPEED = 3;
-    let player = {
-      x: SCREEN_WIDTH / 2,
-      y: SCREEN_HEIGHT / 2,
-      size: PLAYER_SIZE,
-      speed: PLAYER_SPEED,
-      hp: 5
-    };
 
-    // 벽(사각형) 배열
-    const walls = [
-      // 화면 테두리
-      { x: 0, y: 0, w: SCREEN_WIDTH, h: 20 },             // 상단
-      { x: 0, y: SCREEN_HEIGHT - 20, w: SCREEN_WIDTH, h: 20 }, // 하단
-      { x: 0, y: 0, w: 20, h: SCREEN_HEIGHT },             // 좌측
-      { x: SCREEN_WIDTH - 20, y: 0, w: 20, h: SCREEN_HEIGHT }, // 우측
-      // 방 가운데 가로 벽 두 개 (예시)
-      { x: 200, y: 150, w: 400, h: 20 },
-      { x: 200, y: 430, w: 400, h: 20 }
-    ];
-
-    // 탄환, 적 리스트
-    let bullets = [];
-    let enemies = [];
-
-    // 적 스폰 간격 (ms)
-    const ENEMY_SPAWN_INTERVAL = 2000;
-
-    // 키 입력 상태 추적
-    let keys = {};
-    window.addEventListener("keydown", (e) => {
-      keys[e.code] = true;
-    });
-    window.addEventListener("keyup", (e) => {
-      keys[e.code] = false;
-    });
-
-    // 거리 계산
-    function getDistance(ax, ay, bx, by) {
-      return Math.hypot(bx - ax, by - ay);
-    }
-
-    // 벽과 충돌 감지를 위해 사각형 충돌 검사
-    function rectsOverlap(r1, r2) {
-      return !(
-        r1.x + r1.w < r2.x ||
-        r2.x + r2.w < r1.x ||
-        r1.y + r1.h < r2.y ||
-        r2.y + r2.h < r1.y
-      );
-    }
-
-    // 플레이어 이동 처리
-    function movePlayer() {
-      let dx = 0,
-        dy = 0;
-      if (keys["KeyW"]) dy -= player.speed;
-      if (keys["KeyS"]) dy += player.speed;
-      if (keys["KeyA"]) dx -= player.speed;
-      if (keys["KeyD"]) dx += player.speed;
-
-      // X축 가상의 충돌 검사
-      let nextX = player.x + dx;
-      let playerRectX = { x: nextX - player.size / 2, y: player.y - player.size / 2, w: player.size, h: player.size };
-      let collideX = walls.some((w) => rectsOverlap(playerRectX, w));
-      if (!collideX) player.x = nextX;
-
-      // Y축 가상의 충돌 검사
-      let nextY = player.y + dy;
-      let playerRectY = { x: player.x - player.size / 2, y: nextY - player.size / 2, w: player.size, h: player.size };
-      let collideY = walls.some((w) => rectsOverlap(playerRectY, w));
-      if (!collideY) player.y = nextY;
-    }
-
-    // 탄환 객체 생성 함수
-    function shootBullet(dirX, dirY) {
-      // 방향 벡터 정규화
-      let mag = Math.hypot(dirX, dirY);
-      if (mag === 0) {
-        dirX = 0; dirY = -1;
-      } else {
-        dirX /= mag; dirY /= mag;
-      }
-      bullets.push({
-        x: player.x,
-        y: player.y,
-        dx: dirX * 7,
-        dy: dirY * 7,
-        size: 6
-      });
-    }
-
-    // 적 생성 함수 (화면 가장자리 랜덤 위치)
-    function spawnEnemy() {
-      let side = ["top", "bottom", "left", "right"][Math.floor(Math.random() * 4)];
-      let ex, ey;
-      if (side === "top") {
-        ex = Math.random() * (SCREEN_WIDTH - 100) + 50;
-        ey = 30;
-      } else if (side === "bottom") {
-        ex = Math.random() * (SCREEN_WIDTH - 100) + 50;
-        ey = SCREEN_HEIGHT - 30;
-      } else if (side === "left") {
-        ex = 30;
-        ey = Math.random() * (SCREEN_HEIGHT - 100) + 50;
-      } else {
-        ex = SCREEN_WIDTH - 30;
-        ey = Math.random() * (SCREEN_HEIGHT - 100) + 50;
-      }
-      enemies.push({
-        x: ex,
-        y: ey,
-        size: 18,
-        speed: 1.5,
-        hp: 3
-      });
-    }
-
-    // 게임 오버 처리
-    function gameOver() {
-      gameOverDiv.style.display = "block";
-    }
-
-    // 주요 업데이트 함수
-    let lastSpawn = Date.now();
-    function update() {
-      if (player.hp <= 0) return;
-
-      // 플레이어 이동
-      movePlayer();
-
-      // 탄환 발사 (새 프레임마다 화살표 키가 눌린 경우)
-      if (keys["ArrowUp"])    shootBullet(0, -1);
-      if (keys["ArrowDown"])  shootBullet(0, 1);
-      if (keys["ArrowLeft"])  shootBullet(-1, 0);
-      if (keys["ArrowRight"]) shootBullet(1, 0);
-
-      // 탄환 업데이트
-      bullets = bullets.filter(b => {
-        b.x += b.dx;
-        b.y += b.dy;
-        // 화면 밖으로 나가면 제거
-        return !(b.x < -b.size || b.x > SCREEN_WIDTH + b.size || b.y < -b.size || b.y > SCREEN_HEIGHT + b.size);
-      });
-
-      // 적 스폰 간격 체크
-      if (Date.now() - lastSpawn > ENEMY_SPAWN_INTERVAL) {
-        spawnEnemy();
-        lastSpawn = Date.now();
-      }
-
-      // 적 업데이트 (플레이어 추격 및 충돌 검사)
-      enemies = enemies.filter(e => {
-        // 플레이어 방향으로 이동
-        let dx = player.x - e.x;
-        let dy = player.y - e.y;
-        let dist = Math.hypot(dx, dy);
-        if (dist !== 0) {
-          dx /= dist; dy /= dist;
-        }
-        // X축 충돌 체크
-        let nextX = e.x + dx * e.speed;
-        let eRectX = { x: nextX - e.size / 2, y: e.y - e.size / 2, w: e.size, h: e.size };
-        if (!walls.some(w => rectsOverlap(eRectX, w))) {
-          e.x = nextX;
-        }
-        // Y축 충돌 체크
-        let nextY = e.y + dy * e.speed;
-        let eRectY = { x: e.x - e.size / 2, y: nextY - e.size / 2, w: e.size, h: e.size };
-        if (!walls.some(w => rectsOverlap(eRectY, w))) {
-          e.y = nextY;
-        }
-
-        // 플레이어와 충돌 검사
-        let playerRect = { x: player.x - player.size / 2, y: player.y - player.size / 2, w: player.size, h: player.size };
-        let enemyRect  = { x: e.x - e.size / 2,  y: e.y - e.size / 2,   w: e.size,   h: e.size };
-        if (rectsOverlap(playerRect, enemyRect)) {
-          player.hp -= 1;
-          hpDisplay.innerText = "HP: " + player.hp;
-          return false; // 충돌 즉시 적 파괴
-        }
-        return true;
-      });
-
-      // 탄환 ↔ 적 충돌 검사
-      bullets.forEach((b, bi) => {
-        enemies.forEach((e, ei) => {
-          let bRect = { x: b.x - b.size / 2, y: b.y - b.size / 2, w: b.size, h: b.size };
-          let eRect = { x: e.x - e.size / 2, y: e.y - e.size / 2, w: e.size, h: e.size };
-          if (rectsOverlap(bRect, eRect)) {
-            e.hp -= 1;
-            if (e.hp <= 0) {
-              enemies.splice(ei, 1);
-            }
-            bullets.splice(bi, 1);
-          }
-        });
-      });
-
-      if (player.hp <= 0) {
-        gameOver();
-      }
-    }
-
-    // 그리기 함수
-    function draw() {
-      // 배경
-      ctx.fillStyle = "#1e1e1e";
-      ctx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
-
-      // 벽 그리기
-      ctx.fillStyle = "#555";
-      walls.forEach(w => {
-        ctx.fillRect(w.x, w.y, w.w, w.h);
-      });
-
-      // 탄환 그리기
-      ctx.fillStyle = "#f0f000";
-      bullets.forEach(b => {
-        ctx.fillRect(b.x - b.size / 2, b.y - b.size / 2, b.size, b.size);
-      });
-
-      // 적 그리기
-      ctx.fillStyle = "#e03030";
-      enemies.forEach(e => {
-        ctx.fillRect(e.x - e.size / 2, e.y - e.size / 2, e.size, e.size);
-      });
-
-      // 플레이어 그리기
-      ctx.fillStyle = "#32c8dc";
-      ctx.fillRect(player.x - player.size / 2, player.y - player.size / 2, player.size, player.size);
-    }
-
-    // 게임 루프
-    function gameLoop() {
-      update();
-      draw();
-      requestAnimationFrame(gameLoop);
-    }
-
-    // 시작
-    hpDisplay.innerText = "HP: " + player.hp;
-    gameLoop();
-  </script>
-</body>
-</html>
-"""
-
-# Streamlit 페이지에 HTML/JS 임베드
-components.html(html_code, width=820, height=640, scrolling=False)
-"""
-
+if __name__ == "__main__":
+    main()
