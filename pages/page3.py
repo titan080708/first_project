@@ -1,264 +1,204 @@
+# Creating a Streamlit + Python maze game script and saving it as a file.
+# The script will generate a maze in Python, allow movement via Streamlit buttons, and render the maze as an image.
+
+maze_app_code = '''
 import streamlit as st
 import random
-import sys
+from PIL import Image, ImageDraw
 
 # -----------------------------
-# 클래스 정의
+# 설정 값
 # -----------------------------
-class Player:
-    def __init__(self, name):
-        self.name = name
-        self.level = 1
-        self.exp = 0
-        self.next_level_exp = 100
-        self.max_hp = 100
-        self.hp = self.max_hp
-        self.attack = 10
-        self.defense = 5
-        self.gold = 50
-        self.inventory = {"Potion": 3}  # 시작할 때 포션 3개
+CELL_SIZE = 20      # 미로 셀 하나의 크기 (픽셀)
+COLS = 20           # 가로 셀 개수
+ROWS = 20           # 세로 셀 개수
+IMG_WIDTH = COLS * CELL_SIZE
+IMG_HEIGHT = ROWS * CELL_SIZE
 
-    def is_alive(self):
-        return self.hp > 0
+# 색 정의 (RGB)
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+BLUE = (50, 100, 255)   # 플레이어 색
+RED = (255, 80, 80)     # 출구 색
+GREY = (200, 200, 200)  # 배경 그리드 색
 
-    def gain_exp(self, amount):
-        self.exp += amount
-        while self.exp >= self.next_level_exp:
-            self.level_up()
+# -----------------------------
+# 셀 및 미로 생성용 클래스
+# -----------------------------
+class Cell:
+    def __init__(self, col, row):
+        self.col = col
+        self.row = row
+        # 상하좌우 벽 여부 (True면 벽이 있음)
+        self.walls = {'top': True, 'right': True, 'bottom': True, 'left': True}
+        self.visited = False
 
-    def level_up(self):
-        self.exp -= self.next_level_exp
-        self.level += 1
-        self.next_level_exp = int(self.next_level_exp * 1.5)
-        self.max_hp = int(self.max_hp * 1.2)
-        self.attack = int(self.attack * 1.2)
-        self.defense = int(self.defense * 1.1)
-        self.hp = self.max_hp
+    def check_neighbors(self, grid):
+        neighbors = []
+        dirs = [
+            ('top',    self.col,     self.row - 1),
+            ('right',  self.col + 1, self.row    ),
+            ('bottom', self.col,     self.row + 1),
+            ('left',   self.col - 1, self.row    ),
+        ]
+        for direction, nc, nr in dirs:
+            if 0 <= nc < COLS and 0 <= nr < ROWS:
+                neighbor = grid[nr][nc]
+                if not neighbor.visited:
+                    neighbors.append(neighbor)
+        return neighbors
 
-    def use_potion(self):
-        if self.inventory.get("Potion", 0) > 0:
-            self.inventory["Potion"] -= 1
-            heal_amount = int(self.max_hp * 0.3)
-            self.hp = min(self.max_hp, self.hp + heal_amount)
-            return f"▶ {self.name} used a Potion and recovered {heal_amount} HP!"
+def remove_walls(a, b):
+    dx = a.col - b.col
+    dy = a.row - b.row
+    if dx == 1:  # b 가 왼쪽
+        a.walls['left'] = False
+        b.walls['right'] = False
+    elif dx == -1:  # b 가 오른쪽
+        a.walls['right'] = False
+        b.walls['left'] = False
+    if dy == 1:  # b 가 위쪽
+        a.walls['top'] = False
+        b.walls['bottom'] = False
+    elif dy == -1:  # b 가 아래쪽
+        a.walls['bottom'] = False
+        b.walls['top'] = False
+
+def generate_maze():
+    # 2차원 리스트로 Cell 객체 생성
+    grid = [[Cell(c, r) for c in range(COLS)] for r in range(ROWS)]
+    stack = []
+    current = grid[0][0]
+    current.visited = True
+
+    while True:
+        next_cells = current.check_neighbors(grid)
+        if next_cells:
+            next_cell = random.choice(next_cells)
+            stack.append(current)
+            remove_walls(current, next_cell)
+            current = next_cell
+            current.visited = True
+        elif stack:
+            current = stack.pop()
         else:
-            return "▶ You have no Potions!"
+            break
+    return grid
 
-class Enemy:
-    def __init__(self, name, level):
-        self.name = name
-        self.level = level
-        self.max_hp = level * 50
-        self.hp = self.max_hp
-        self.attack = level * 8
-        self.defense = level * 4
-        self.exp_drop = level * 50
-        self.gold_drop = level * 20
+def draw_maze(grid, player_pos, exit_pos):
+    img = Image.new("RGB", (IMG_WIDTH, IMG_HEIGHT), WHITE)
+    draw = ImageDraw.Draw(img)
 
-    def is_alive(self):
-        return self.hp > 0
+    # 배경 그리드 (희미한 회색 선)
+    for r in range(ROWS+1):
+        y = r * CELL_SIZE
+        draw.line([(0, y), (IMG_WIDTH, y)], fill=GREY, width=1)
+    for c in range(COLS+1):
+        x = c * CELL_SIZE
+        draw.line([(x, 0), (x, IMG_HEIGHT)], fill=GREY, width=1)
+
+    # 벽 그리기
+    for r in range(ROWS):
+        for c in range(COLS):
+            cell = grid[r][c]
+            x = c * CELL_SIZE
+            y = r * CELL_SIZE
+            if cell.walls['top']:
+                draw.line([(x, y), (x + CELL_SIZE, y)], fill=BLACK, width=2)
+            if cell.walls['right']:
+                draw.line([(x + CELL_SIZE, y), (x + CELL_SIZE, y + CELL_SIZE)], fill=BLACK, width=2)
+            if cell.walls['bottom']:
+                draw.line([(x + CELL_SIZE, y + CELL_SIZE), (x, y + CELL_SIZE)], fill=BLACK, width=2)
+            if cell.walls['left']:
+                draw.line([(x, y + CELL_SIZE), (x, y)], fill=BLACK, width=2)
+
+    # 출구 그리기 (빨간 정사각)
+    ec, er = exit_pos
+    exit_x = ec * CELL_SIZE + CELL_SIZE//4
+    exit_y = er * CELL_SIZE + CELL_SIZE//4
+    size = CELL_SIZE//2
+    draw.rectangle([exit_x, exit_y, exit_x + size, exit_y + size], fill=RED)
+
+    # 플레이어 그리기 (파란 원)
+    pc, pr = player_pos
+    center_x = pc * CELL_SIZE + CELL_SIZE//2
+    center_y = pr * CELL_SIZE + CELL_SIZE//2
+    radius = CELL_SIZE//3
+    draw.ellipse([(center_x - radius, center_y - radius),
+                  (center_x + radius, center_y + radius)], fill=BLUE)
+
+    return img
 
 # -----------------------------
+# Streamlit 앱
+# -----------------------------
+st.title("Python + Streamlit Maze Game")
+
 # 세션 상태 초기화
-# -----------------------------
 if "initialized" not in st.session_state:
     st.session_state.initialized = True
-    st.session_state.player = None
-    st.session_state.quest_status = {"started": False, "completed": False, "rewarded": False}
-    st.session_state.location = None
-    st.session_state.in_battle = False
-    st.session_state.enemy = None
-    st.session_state.forest_state = None
+    st.session_state.grid = generate_maze()
+    st.session_state.player_pos = (0, 0)
+    st.session_state.exit_pos = (COLS-1, ROWS-1)
     st.session_state.message = ""
 
-# -----------------------------
-# 플레이어 생성 화면
-# -----------------------------
-if st.session_state.player is None:
-    st.title("Text RPG (Streamlit)")
-    name = st.text_input("Enter your character's name:", "")
-    if st.button("Start Game") and name.strip():
-        st.session_state.player = Player(name.strip())
-        st.session_state.location = "Town"
-        st.experimental_rerun()
-    st.stop()
+grid = st.session_state.grid
+player_pos = st.session_state.player_pos
+exit_pos = st.session_state.exit_pos
 
-# -----------------------------
-# 세션 상태 가져오기
-# -----------------------------
-player = st.session_state.player
-quest_status = st.session_state.quest_status
-location = st.session_state.location
-in_battle = st.session_state.in_battle
-enemy = st.session_state.enemy
-forest_state = st.session_state.forest_state
-message = st.session_state.message
+# 움직임 처리 함수
+def move_player(direction):
+    pc, pr = st.session_state.player_pos
+    grid = st.session_state.grid
+    cell = grid[pr][pc]
 
-# -----------------------------
-# 상태 표시 함수
-# -----------------------------
-def show_status():
-    st.subheader(f"{player.name}'s Status")
-    st.write(f"Level: {player.level} | EXP: {player.exp}/{player.next_level_exp}")
-    st.write(f"HP: {player.hp}/{player.max_hp} | Attack: {player.attack} | Defense: {player.defense}")
-    st.write(f"Gold: {player.gold}")
-    st.write(f"Potions: {player.inventory.get('Potion', 0)}")
-    st.markdown("---")
+    if direction == "left":
+        if not cell.walls['left']:
+            pc -= 1
+    elif direction == "right":
+        if not cell.walls['right']:
+            pc += 1
+    elif direction == "up":
+        if not cell.walls['top']:
+            pr -= 1
+    elif direction == "down":
+        if not cell.walls['bottom']:
+            pr += 1
 
-# -----------------------------
-# 전투 처리 함수
-# -----------------------------
-def do_battle(action):
-    player = st.session_state.player
-    enemy = st.session_state.enemy
+    # 범위 검사
+    pc = max(0, min(COLS-1, pc))
+    pr = max(0, min(ROWS-1, pr))
+    st.session_state.player_pos = (pc, pr)
 
-    if action == "Attack":
-        dmg = max(0, player.attack - enemy.defense + random.randint(-5, 5))
-        enemy.hp = max(0, enemy.hp - dmg)
-        st.session_state.message = f"▶ You attack {enemy.name} for {dmg} damage. (Enemy HP: {enemy.hp}/{enemy.max_hp})"
-        if not enemy.is_alive():
-            st.session_state.message += f"\\n▶ You defeated {enemy.name}!"
-            player.gain_exp(enemy.exp_drop)
-            player.gold += enemy.gold_drop
-            st.session_state.message += f" Gained {enemy.exp_drop} EXP and {enemy.gold_drop} gold."
-            if enemy.name == "Goblin King":
-                st.session_state.quest_status["completed"] = True
-            st.session_state.in_battle = False
-            st.session_state.enemy = None
-            return
+    # 출구 확인
+    if (pc, pr) == st.session_state.exit_pos:
+        st.session_state.message = "🎉 You Escaped! 🎉"
+    else:
+        st.session_state.message = ""
 
-    elif action == "Use Potion":
-        msg = player.use_potion()
-        st.session_state.message = msg
+# 화면 레이아웃
+col1, col2, col3 = st.columns([1,2,1])
 
-    elif action == "Run":
-        if random.random() < 0.5:
-            st.session_state.message = "▶ You successfully ran away!"
-            st.session_state.in_battle = False
-            st.session_state.enemy = None
-            return
-        else:
-            st.session_state.message = "▶ Failed to run away!"
+with col1:
+    if st.button("⯇ Left"):
+        move_player("left")
+    if st.button("⯆ Down"):
+        move_player("down")
 
-    # 적 턴
-    if enemy.is_alive():
-        edmg = max(0, enemy.attack - player.defense + random.randint(-5, 5))
-        player.hp = max(0, player.hp - edmg)
-        st.session_state.message += f"\\n▶ {enemy.name} attacks you for {edmg} damage. (Your HP: {player.hp}/{player.max_hp})"
-        if not player.is_alive():
-            st.session_state.message += "\\n▶ You were defeated! Game Over."
-            st.write(st.session_state.message)
-            st.stop()
+with col2:
+    maze_img = draw_maze(grid, player_pos, exit_pos)
+    st.image(maze_img, caption=st.session_state.message, use_column_width=True)
 
-# -----------------------------
-# 마을 UI
-# -----------------------------
-def visit_town():
-    st.header("Town")
-    if st.button("Talk to NPC"):
-        if not quest_status["started"]:
-            st.session_state.message = "NPC: 'Brave adventurer! A Goblin King is terrorizing the Forest. Defeat him for 100 gold!'"
-            quest_status["started"] = True
-        elif quest_status["completed"] and not quest_status["rewarded"]:
-            st.session_state.message = "NPC: 'Thank you for defeating the Goblin King! Here's 100 gold!'"
-            player.gold += 100
-            st.session_state.quest_status["rewarded"] = True
-        elif quest_status["rewarded"]:
-            st.session_state.message = "NPC: 'We are forever in your debt, hero!'"
-        else:
-            st.session_state.message = "NPC: 'The Goblin King still awaits you in the Forest.'"
+with col3:
+    if st.button("⯅ Up"):
+        move_player("up")
+    if st.button("⯈ Right"):
+        move_player("right")
+'''
 
-    if st.button("Visit Shop"):
-        visit_shop()
+# 저장 경로
+file_path = "/mnt/data/streamlit_maze_combined.py"
+with open(file_path, "w", encoding="utf-8") as f:
+    f.write(maze_app_code)
 
-    if st.button("Rest at Inn"):
-        cost = 10
-        if player.gold >= cost:
-            player.gold -= cost
-            player.hp = player.max_hp
-            st.session_state.message = f"▶ You rested at the inn. HP fully recovered. (Gold: {player.gold})"
-        else:
-            st.session_state.message = "▶ Not enough gold to rest."
-
-    if st.button("Go to Forest"):
-        st.session_state.location = "Forest"
-        st.session_state.forest_state = "start"
-        st.experimental_rerun()
-
-    if st.button("View Status"):
-        pass  # 상태는 상단에 항상 표시됨
-
-# -----------------------------
-# 상점 UI
-# -----------------------------
-def visit_shop():
-    st.subheader("Shop")
-    st.write("Potion (20 gold)")
-    if st.button("Buy Potion"):
-        if player.gold >= 20:
-            player.gold -= 20
-            player.inventory["Potion"] = player.inventory.get("Potion", 0) + 1
-            st.session_state.message = "▶ Bought a Potion."
-        else:
-            st.session_state.message = "▶ Not enough gold!"
-
-# -----------------------------
-# 숲 UI
-# -----------------------------
-def visit_forest():
-    if st.session_state.forest_state == "start":
-        if quest_status["started"] and not quest_status["completed"]:
-            st.session_state.enemy = Enemy("Goblin King", level=3)
-            st.session_state.in_battle = True
-            st.session_state.forest_state = None
-        else:
-            if random.random() < 0.3:
-                st.session_state.message = "▶ No enemies encountered. You explore peacefully."
-                st.session_state.forest_state = "explored"
-            else:
-                lvl = 1 if not quest_status["started"] else 2
-                st.session_state.enemy = Enemy("Goblin", level=lvl)
-                st.session_state.in_battle = True
-                st.session_state.forest_state = None
-
-    elif st.session_state.forest_state == "explored":
-        st.write("▶ You explored the forest peacefully.")
-        if st.button("Return to Town"):
-            st.session_state.location = "Town"
-            st.session_state.forest_state = None
-            st.experimental_rerun()
-
-# -----------------------------
-# 메인 화면
-# -----------------------------
-st.title("Text RPG (Streamlit)")
-show_status()
-
-if st.session_state.message:
-    st.write(st.session_state.message)
-
-# 전투 중이라면 전투 UI 표시
-if in_battle and st.session_state.enemy:
-    enemy = st.session_state.enemy
-    st.header(f"Battle: {enemy.name} (Lv {enemy.level})")
-    st.write(f"Enemy HP: {enemy.hp}/{enemy.max_hp} | Attack: {enemy.attack} | Defense: {enemy.defense}")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        if st.button("Attack"):
-            do_battle("Attack")
-            st.experimental_rerun()
-    with col2:
-        if st.button("Use Potion"):
-            do_battle("Use Potion")
-            st.experimental_rerun()
-    with col3:
-        if st.button("Run"):
-            do_battle("Run")
-            st.experimental_rerun()
-
-# 전투 중이 아니면 위치에 따른 UI 표시
-elif location == "Town":
-    visit_town()
-
-elif location == "Forest":
-    visit_forest()
+file_path
