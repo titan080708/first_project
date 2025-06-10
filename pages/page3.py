@@ -1,3 +1,4 @@
+import streamlit as st
 import random
 import sys
 
@@ -15,47 +16,33 @@ class Player:
         self.attack = 10
         self.defense = 5
         self.gold = 50
-        self.inventory = {"Potion": 3}  # 시작 시 포션 3개 보유
+        self.inventory = {"Potion": 3}  # 시작할 때 포션 3개
 
     def is_alive(self):
         return self.hp > 0
 
     def gain_exp(self, amount):
         self.exp += amount
-        print(f"\n▶ You gained {amount} EXP.")
         while self.exp >= self.next_level_exp:
             self.level_up()
 
     def level_up(self):
         self.exp -= self.next_level_exp
         self.level += 1
-        # 다음 레벨업에 필요한 경험치 증가
         self.next_level_exp = int(self.next_level_exp * 1.5)
-        # 능력치 상승
         self.max_hp = int(self.max_hp * 1.2)
         self.attack = int(self.attack * 1.2)
         self.defense = int(self.defense * 1.1)
         self.hp = self.max_hp
-        print(f"\n*** Congratulations! You reached level {self.level}! ***")
-        print(f"   ▶ New Stats → HP: {self.max_hp}, Attack: {self.attack}, Defense: {self.defense}\n")
 
     def use_potion(self):
         if self.inventory.get("Potion", 0) > 0:
             self.inventory["Potion"] -= 1
             heal_amount = int(self.max_hp * 0.3)
             self.hp = min(self.max_hp, self.hp + heal_amount)
-            print(f"\n▶ You used a Potion and recovered {heal_amount} HP. (HP: {self.hp}/{self.max_hp})")
+            return f"▶ {self.name} used a Potion and recovered {heal_amount} HP!"
         else:
-            print("\n▶ You have no Potions!")
-
-    def show_status(self):
-        print(f"\n-- {self.name}'s Status --")
-        print(f" Level: {self.level} | EXP: {self.exp}/{self.next_level_exp}")
-        print(f" HP: {self.hp}/{self.max_hp} | Attack: {self.attack} | Defense: {self.defense}")
-        print(f" Gold: {self.gold}")
-        print(f" Inventory: {self.inventory}")
-        print("--------------------------\n")
-
+            return "▶ You have no Potions!"
 
 class Enemy:
     def __init__(self, name, level):
@@ -71,188 +58,207 @@ class Enemy:
     def is_alive(self):
         return self.hp > 0
 
-    def show_stats(self):
-        print(f"\n-- {self.name} (Lv {self.level}) --")
-        print(f" HP: {self.hp}/{self.max_hp} | Attack: {self.attack} | Defense: {self.defense}")
-        print("--------------------------\n")
-
+# -----------------------------
+# 세션 상태 초기화
+# -----------------------------
+if "initialized" not in st.session_state:
+    st.session_state.initialized = True
+    st.session_state.player = None
+    st.session_state.quest_status = {"started": False, "completed": False, "rewarded": False}
+    st.session_state.location = None
+    st.session_state.in_battle = False
+    st.session_state.enemy = None
+    st.session_state.forest_state = None
+    st.session_state.message = ""
 
 # -----------------------------
-# 전투 함수
+# 플레이어 생성 화면
 # -----------------------------
-def battle(player, enemy):
-    print(f"\n▶ A wild {enemy.name} appeared!")
-    enemy.show_stats()
+if st.session_state.player is None:
+    st.title("Text RPG (Streamlit)")
+    name = st.text_input("Enter your character's name:", "")
+    if st.button("Start Game") and name.strip():
+        st.session_state.player = Player(name.strip())
+        st.session_state.location = "Town"
+        st.experimental_rerun()
+    st.stop()
 
-    while player.is_alive() and enemy.is_alive():
-        print("Choose action: [1] Attack  [2] Use Potion  [3] Run")
-        choice = input("> ").strip()
+# -----------------------------
+# 세션 상태 가져오기
+# -----------------------------
+player = st.session_state.player
+quest_status = st.session_state.quest_status
+location = st.session_state.location
+in_battle = st.session_state.in_battle
+enemy = st.session_state.enemy
+forest_state = st.session_state.forest_state
+message = st.session_state.message
 
-        if choice == "1":
-            # 플레이어 공격
-            damage = max(0, player.attack - enemy.defense + random.randint(-5, 5))
-            enemy.hp = max(0, enemy.hp - damage)
-            print(f"▶ You attack {enemy.name} for {damage} damage. (Enemy HP: {enemy.hp}/{enemy.max_hp})")
+# -----------------------------
+# 상태 표시 함수
+# -----------------------------
+def show_status():
+    st.subheader(f"{player.name}'s Status")
+    st.write(f"Level: {player.level} | EXP: {player.exp}/{player.next_level_exp}")
+    st.write(f"HP: {player.hp}/{player.max_hp} | Attack: {player.attack} | Defense: {player.defense}")
+    st.write(f"Gold: {player.gold}")
+    st.write(f"Potions: {player.inventory.get('Potion', 0)}")
+    st.markdown("---")
 
-            if not enemy.is_alive():
-                print(f"\n▶ You defeated {enemy.name}!")
-                player.gain_exp(enemy.exp_drop)
-                player.gold += enemy.gold_drop
-                print(f"▶ You found {enemy.gold_drop} gold. (Gold: {player.gold})\n")
-                return True
+# -----------------------------
+# 전투 처리 함수
+# -----------------------------
+def do_battle(action):
+    player = st.session_state.player
+    enemy = st.session_state.enemy
 
-        elif choice == "2":
-            player.use_potion()
+    if action == "Attack":
+        dmg = max(0, player.attack - enemy.defense + random.randint(-5, 5))
+        enemy.hp = max(0, enemy.hp - dmg)
+        st.session_state.message = f"▶ You attack {enemy.name} for {dmg} damage. (Enemy HP: {enemy.hp}/{enemy.max_hp})"
+        if not enemy.is_alive():
+            st.session_state.message += f"\\n▶ You defeated {enemy.name}!"
+            player.gain_exp(enemy.exp_drop)
+            player.gold += enemy.gold_drop
+            st.session_state.message += f" Gained {enemy.exp_drop} EXP and {enemy.gold_drop} gold."
+            if enemy.name == "Goblin King":
+                st.session_state.quest_status["completed"] = True
+            st.session_state.in_battle = False
+            st.session_state.enemy = None
+            return
 
-        elif choice == "3":
-            # 도망 성공 확률 50%
-            if random.random() < 0.5:
-                print("\n▶ You successfully ran away!")
-                return False
-            else:
-                print("\n▶ Failed to run away!")
+    elif action == "Use Potion":
+        msg = player.use_potion()
+        st.session_state.message = msg
 
+    elif action == "Run":
+        if random.random() < 0.5:
+            st.session_state.message = "▶ You successfully ran away!"
+            st.session_state.in_battle = False
+            st.session_state.enemy = None
+            return
         else:
-            print("\n▶ Invalid choice. Try again.")
+            st.session_state.message = "▶ Failed to run away!"
 
-        # 적 턴
-        if enemy.is_alive():
-            damage = max(0, enemy.attack - player.defense + random.randint(-5, 5))
-            player.hp = max(0, player.hp - damage)
-            print(f"▶ {enemy.name} attacks you for {damage} damage. (Your HP: {player.hp}/{player.max_hp})")
-            if not player.is_alive():
-                print("\n▶ You were defeated! Game Over.")
-                sys.exit()
-
-    return False
-
+    # 적 턴
+    if enemy.is_alive():
+        edmg = max(0, enemy.attack - player.defense + random.randint(-5, 5))
+        player.hp = max(0, player.hp - edmg)
+        st.session_state.message += f"\\n▶ {enemy.name} attacks you for {edmg} damage. (Your HP: {player.hp}/{player.max_hp})"
+        if not player.is_alive():
+            st.session_state.message += "\\n▶ You were defeated! Game Over."
+            st.write(st.session_state.message)
+            st.stop()
 
 # -----------------------------
-# 마을(Town) 및 숲(Forest) 로직
+# 마을 UI
 # -----------------------------
-def visit_town(player, quest_status):
-    print("\n▶ You are in the Town.")
-    print("Options: [1] Talk to NPC  [2] Visit Shop  [3] Rest at Inn  [4] Go to Forest  [5] View Status")
-    choice = input("> ").strip()
-
-    if choice == "1":
-        # NPC 대화 및 퀘스트 진행
-        if not quest_status.get("started"):
-            print("\nNPC: 'Brave adventurer! Can you help us? A Goblin King is terrorizing the Forest.'")
-            print("NPC: 'Defeat the Goblin King and you shall be rewarded with 100 gold!'")
+def visit_town():
+    st.header("Town")
+    if st.button("Talk to NPC"):
+        if not quest_status["started"]:
+            st.session_state.message = "NPC: 'Brave adventurer! A Goblin King is terrorizing the Forest. Defeat him for 100 gold!'"
             quest_status["started"] = True
-
-        elif quest_status.get("completed") and not quest_status.get("rewarded"):
-            print("\nNPC: 'Thank you for defeating the Goblin King! Here's your reward.'")
+        elif quest_status["completed"] and not quest_status["rewarded"]:
+            st.session_state.message = "NPC: 'Thank you for defeating the Goblin King! Here's 100 gold!'"
             player.gold += 100
-            print(f"▶ You received 100 gold! (Gold: {player.gold})")
-            quest_status["rewarded"] = True
-
-        elif quest_status.get("rewarded"):
-            print("\nNPC: 'We are forever in your debt, hero!'")
-
+            st.session_state.quest_status["rewarded"] = True
+        elif quest_status["rewarded"]:
+            st.session_state.message = "NPC: 'We are forever in your debt, hero!'"
         else:
-            print("\nNPC: 'The Goblin King still awaits you in the Forest.'")
+            st.session_state.message = "NPC: 'The Goblin King still awaits you in the Forest.'"
 
-    elif choice == "2":
-        visit_shop(player)
+    if st.button("Visit Shop"):
+        visit_shop()
 
-    elif choice == "3":
-        # 여관 휴식: 골드 10 소모 → HP 전부 회복
+    if st.button("Rest at Inn"):
         cost = 10
-        print(f"\nInn: Resting costs {cost} gold. Confirm? [Y/N]")
-        confirm = input("> ").lower().strip()
-        if confirm == "y" and player.gold >= cost:
+        if player.gold >= cost:
             player.gold -= cost
             player.hp = player.max_hp
-            print(f"▶ You rested at the inn. HP fully recovered. (Gold: {player.gold})")
+            st.session_state.message = f"▶ You rested at the inn. HP fully recovered. (Gold: {player.gold})"
         else:
-            print("\n▶ You don't have enough gold or you canceled.")
+            st.session_state.message = "▶ Not enough gold to rest."
 
-    elif choice == "4":
-        return "Forest", quest_status
+    if st.button("Go to Forest"):
+        st.session_state.location = "Forest"
+        st.session_state.forest_state = "start"
+        st.experimental_rerun()
 
-    elif choice == "5":
-        player.show_status()
+    if st.button("View Status"):
+        pass  # 상태는 상단에 항상 표시됨
 
-    else:
-        print("\n▶ Invalid choice.")
-
-    return "Town", quest_status
-
-
-def visit_shop(player):
-    print("\n▶ Welcome to the Shop!")
-    print("Items available: [1] Potion (20 gold)  [2] Return to Town")
-    choice = input("> ").strip()
-
-    if choice == "1":
+# -----------------------------
+# 상점 UI
+# -----------------------------
+def visit_shop():
+    st.subheader("Shop")
+    st.write("Potion (20 gold)")
+    if st.button("Buy Potion"):
         if player.gold >= 20:
             player.gold -= 20
             player.inventory["Potion"] = player.inventory.get("Potion", 0) + 1
-            print(f"▶ Purchased a Potion. (Potions: {player.inventory['Potion']}, Gold: {player.gold})")
+            st.session_state.message = "▶ Bought a Potion."
         else:
-            print("\n▶ Not enough gold.")
-
-    elif choice == "2":
-        return
-
-    else:
-        print("\n▶ Invalid choice.")
-
-    visit_shop(player)
-
-
-def visit_forest(player, quest_status):
-    print("\n▶ You venture into the Forest.")
-
-    # 퀘스트가 시작되었고 완료되지 않았다면 보스(고블린 킹) 등장
-    if quest_status.get("started") and not quest_status.get("completed"):
-        enemy = Enemy("Goblin King", level=3)
-        defeated = battle(player, enemy)
-        if defeated:
-            quest_status["completed"] = True
-
-    else:
-        # 일반 몬스터 등장 확률 (약 70% 전투, 30% 평화 탐험)
-        if random.random() < 0.3:
-            print("▶ No enemies encountered. You explore peacefully.")
-        else:
-            # 퀘스트 시작 전: Goblin Lv1, 퀘스트 중: Goblin Lv2
-            goblin_level = 1 if not quest_status.get("started") else 2
-            enemy = Enemy("Goblin", level=goblin_level)
-            battle(player, enemy)
-
-    print("▶ Returning to Town...")
-    return "Town", quest_status
-
+            st.session_state.message = "▶ Not enough gold!"
 
 # -----------------------------
-# 메인 게임 루프
+# 숲 UI
 # -----------------------------
-def main():
-    print("=== Welcome to the Text RPG ===")
-    name = input("Enter your character's name: ").strip()
-    if not name:
-        name = "Hero"
-    player = Player(name)
-
-    # 퀘스트 상태 관리
-    quest_status = {
-        "started": False,
-        "completed": False,
-        "rewarded": False
-    }
-    location = "Town"
-
-    while True:
-        if location == "Town":
-            location, quest_status = visit_town(player, quest_status)
-        elif location == "Forest":
-            location, quest_status = visit_forest(player, quest_status)
+def visit_forest():
+    if st.session_state.forest_state == "start":
+        if quest_status["started"] and not quest_status["completed"]:
+            st.session_state.enemy = Enemy("Goblin King", level=3)
+            st.session_state.in_battle = True
+            st.session_state.forest_state = None
         else:
-            location = "Town"
+            if random.random() < 0.3:
+                st.session_state.message = "▶ No enemies encountered. You explore peacefully."
+                st.session_state.forest_state = "explored"
+            else:
+                lvl = 1 if not quest_status["started"] else 2
+                st.session_state.enemy = Enemy("Goblin", level=lvl)
+                st.session_state.in_battle = True
+                st.session_state.forest_state = None
 
+    elif st.session_state.forest_state == "explored":
+        st.write("▶ You explored the forest peacefully.")
+        if st.button("Return to Town"):
+            st.session_state.location = "Town"
+            st.session_state.forest_state = None
+            st.experimental_rerun()
 
-if __name__ == "__main__":
-    main()
+# -----------------------------
+# 메인 화면
+# -----------------------------
+st.title("Text RPG (Streamlit)")
+show_status()
+
+if st.session_state.message:
+    st.write(st.session_state.message)
+
+# 전투 중이라면 전투 UI 표시
+if in_battle and st.session_state.enemy:
+    enemy = st.session_state.enemy
+    st.header(f"Battle: {enemy.name} (Lv {enemy.level})")
+    st.write(f"Enemy HP: {enemy.hp}/{enemy.max_hp} | Attack: {enemy.attack} | Defense: {enemy.defense}")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("Attack"):
+            do_battle("Attack")
+            st.experimental_rerun()
+    with col2:
+        if st.button("Use Potion"):
+            do_battle("Use Potion")
+            st.experimental_rerun()
+    with col3:
+        if st.button("Run"):
+            do_battle("Run")
+            st.experimental_rerun()
+
+# 전투 중이 아니면 위치에 따른 UI 표시
+elif location == "Town":
+    visit_town()
+
+elif location == "Forest":
+    visit_forest()
